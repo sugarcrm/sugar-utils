@@ -4,6 +4,7 @@ require 'solid_assert'
 require 'fileutils'
 require 'multi_json'
 require 'timeout'
+require 'tempfile'
 
 require 'sugar_utils/file/write_options'
 
@@ -176,6 +177,63 @@ module SugarUtils
         if write_options.flush?
           file.flush
           file.fsync
+        end
+      end
+
+      change_access(
+        filename,
+        write_options.owner,
+        write_options.group,
+        write_options.perm
+      )
+    rescue Timeout::Error
+      raise(Error, "Unable to write #{filename} because it is locked")
+    rescue SystemCallError, IOError => e
+      raise(Error, "Unable to write #{filename} with #{e}")
+    end
+
+    # Atomically write to an existing file, overwriting it, or create the file
+    # if it does not exist.
+    #
+    # @note Either option :mode or :perm can be used to specific the permissions
+    # on the file being written to. This aliasing is used because both these
+    # names are used in the standard library, File.open uses :perm and FileUtils
+    # uses :mode. The user can choose whichever alias makes their code most
+    # readable.
+    #
+    # @param filename [String]
+    # @param data [#to_s]
+    # @param options [Hash]
+    # @option options [Integer] :timeout (10)
+    # @option options [Boolean] :flush (false)
+    # @option options [String, Integer] :owner
+    # @option options [String, Integer] :group
+    # @option options [Integer] :mode (0o644)
+    # @option options [Integer] :perm (0o644)
+    #
+    # @raise [SugarUtils::File::Error]
+    #
+    # @return [void]
+    def self.atomic_write(filename, data, options = {}) # rubocop:disable MethodLength, AbcSize
+      write_options = WriteOptions.new(filename, options)
+
+      # @see https://apidock.com/rails/File/atomic_write/class
+      FileUtils.mkdir_p(::File.dirname(filename))
+      Tempfile.open(::File.basename(filename, '.*'), ::File.dirname(filename)) do |temp_file|
+        temp_file.puts(data.to_s)
+        # Flush and fsync to be 100% sure we write this data out now because we
+        # are often reading it immediately and if the OS is buffering, it is
+        # possible we might read it before it is been physically written to
+        # disk. We are not worried about speed here, so this should be OKAY.
+        if write_options.flush?
+          temp_file.flush
+          temp_file.fsync
+        end
+        temp_file.close
+
+        ::File.open(filename, 'w+', write_options.perm) do |file|
+          flock_exclusive(file, options)
+          FileUtils.move(temp_file.path, filename)
         end
       end
 
