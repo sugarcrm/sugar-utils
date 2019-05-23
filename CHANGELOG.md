@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Changed
 - :mode and :perm are now aliases for setting permissions on files in all the
   related methods (i.e., .write, .write_json, .touch, .append)
+- convert SugarUtils::File.write_json to use .atomic_write
 
 ## [0.5.0] - 2018-05-01
 ### Changed

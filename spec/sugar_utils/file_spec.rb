@@ -422,7 +422,7 @@ describe SugarUtils::File do
     let(:data) { { 'key' => 'value' } }
 
     before do
-      expect(described_class).to receive(:write).with(
+      expect(described_class).to receive(:atomic_write).with(
         :filename, MultiJson.dump(data, pretty: true), :options
       )
     end
