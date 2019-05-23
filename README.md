@@ -61,6 +61,12 @@ $ gem install sugar_utils
 
 See [CONTRIBUTING](CONTRIBUTING.md) for how you can contribute changes back into this project.
 
-## Acknowledgments
+## Contributors
 
-Copyright 2016 [SugarCRM Inc.](http://sugarcrm.com), released under the Apache2 License.
+* [Andrew Sullivan Cant](https://github.com/acant)
+* [Robert Lockstone](https://github.com/lockstone)
+* [Vadim Kazakov](https://github.com/yads)
+
+## Acknowledgements
+
+Copyright 2019 [SugarCRM Inc.](http://sugarcrm.com), released under the Apache2 License.
