@@ -313,6 +313,109 @@ describe SugarUtils::File do
     end
   end
 
+  describe '.atomic_write', :fakefs do
+    subject { described_class.atomic_write(filename, data, options) }
+
+    let(:data)      { 'content' }
+    let(:filename)  { 'dir1/dir2/filename' }
+
+    context 'when SystemCallError' do
+      let(:options) { {} }
+      let(:exception) { SystemCallError.new(nil) }
+
+      before { allow(File).to receive(:open).and_raise(exception) }
+
+      it { expect_raise_error("Unable to write #{filename} with #{exception}") }
+    end
+
+    context 'when IOError' do
+      let(:options) { {} }
+      let(:exception) { IOError.new(nil) }
+
+      before { allow(File).to receive(:open).and_raise(exception) }
+
+      it { expect_raise_error("Unable to write #{filename} with #{exception}") }
+    end
+
+    context 'when locked' do
+      let(:options) { {} }
+
+      before do
+        expect(described_class).to receive(:flock_exclusive)
+          .with(kind_of(File), options)
+          .and_raise(Timeout::Error)
+      end
+
+      it { expect_raise_error("Unable to write #{filename} because it is locked") }
+    end
+
+    shared_examples_for 'file is correctly written' do
+      before do
+        expect(described_class).to receive(:flock_exclusive)
+          .with(kind_of(File), options)
+      end
+
+      # rubocop:disable RSpec/NestedGroups
+      context 'without options' do
+        let(:options) { {} }
+
+        it { expect_not_to_raise_error }
+        its_side_effects_are do
+          expect(filename).to have_content(data)
+          expect(filename).to have_file_permission(0o100644)
+        end
+      end
+
+      context 'with options' do
+        let(:options) do
+          { flush: true, owner: 'nobody', group: 'nogroup', mode_or_perm_key => 0o600 }
+        end
+
+        before do
+          # rubocop:disable RSpec/AnyInstance
+          expect_any_instance_of(File).to receive(:flush)
+          expect_any_instance_of(File).to receive(:fsync)
+          # rubocop:enable RSpec/AnyInstance
+        end
+
+        context 'with mode key' do
+          let(:mode_or_perm_key) { :mode }
+
+          it { expect_not_to_raise_error }
+          its_side_effects_are do
+            expect(filename).to have_content(data)
+            expect(filename).to have_owner('nobody')
+            expect(filename).to have_group('nogroup')
+            expect(filename).to have_file_permission(0o100600)
+          end
+        end
+
+        context 'with perm key' do
+          let(:mode_or_perm_key) { :perm }
+
+          it { expect_not_to_raise_error }
+          its_side_effects_are do
+            expect(filename).to have_content(data)
+            expect(filename).to have_owner('nobody')
+            expect(filename).to have_group('nogroup')
+            expect(filename).to have_file_permission(0o100600)
+          end
+        end
+      end
+      # rubocop:enable RSpec/NestedGroups
+    end
+
+    context 'when file does not exist' do
+      it_behaves_like 'file is correctly written'
+    end
+
+    context 'when file exists' do
+      before { write(filename, 'foobar', 0o777) }
+
+      it_behaves_like 'file is correctly written'
+    end
+  end
+
   describe '.write_json', :fakefs do
     subject { described_class.write_json(:filename, data, :options) }
 

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   characters out of a string
 - SugarUtils::File.change_access, a wrapper for changing ownership and
   permissions of a file
+- SugarUtils::File.atomic_write, to atomically write a file
 ### Removed
 - append support in SugarUtils::File.write (could have been specified by { mode: 'a })
 ### Changed
