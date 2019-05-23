@@ -271,7 +271,7 @@ module SugarUtils
     #
     # @return [void]
     def self.write_json(filename, data, options = {})
-      write(filename, MultiJson.dump(data, pretty: true), options)
+      atomic_write(filename, MultiJson.dump(data, pretty: true), options)
     end
 
     # Append to an existing file, or create the file if it does not exist.
