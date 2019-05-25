@@ -85,3 +85,11 @@ RSpec::Matchers.define :have_mtime do |expected|
     values_match?(@expected, @actual)
   end
 end
+
+RSpec::Matchers.define :be_directory do
+  match do |actual|
+    @actual   = File.directory?(actual)
+    @expected = true
+    values_match?(@expected, @actual)
+  end
+end

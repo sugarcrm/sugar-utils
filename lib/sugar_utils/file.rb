@@ -3,9 +3,9 @@
 require 'solid_assert'
 require 'fileutils'
 require 'multi_json'
-require 'timeout'
 require 'tempfile'
 
+require 'sugar_utils/file/lock'
 require 'sugar_utils/file/write_options'
 
 module SugarUtils
@@ -21,8 +21,7 @@ module SugarUtils
     #
     # @return [void]
     def self.flock_shared(file, options = {})
-      timeout = options[:timeout] || 10
-      Timeout.timeout(timeout) { file.flock(::File::LOCK_SH) }
+      Lock.flock_shared(file, options)
     end
 
     # @param file [File]
@@ -33,8 +32,7 @@ module SugarUtils
     #
     # @return [void]
     def self.flock_exclusive(file, options = {})
-      timeout = options[:timeout] || 10
-      Timeout.timeout(timeout) { file.flock(::File::LOCK_EX) }
+      Lock.flock_exclusive(file, options)
     end
 
     # Change all of the access values for the specified file including:
@@ -129,7 +127,7 @@ module SugarUtils
     def self.touch(filename, options = {})
       write_options = WriteOptions.new(filename, options)
 
-      FileUtils.mkdir_p(::File.dirname(filename))
+      write_options.mkdirname_p
       FileUtils.touch(filename, write_options.slice(:mtime))
       change_access(
         filename,
@@ -161,23 +159,11 @@ module SugarUtils
     # @raise [SugarUtils::File::Error]
     #
     # @return [void]
-    def self.write(filename, data, options = {}) # rubocop:disable MethodLength, AbcSize
+    def self.write(filename, data, options = {}) # rubocop:disable MethodLength
       write_options = WriteOptions.new(filename, options)
 
-      FileUtils.mkdir_p(::File.dirname(filename))
-      ::File.open(filename, 'w+', write_options.perm) do |file|
-        flock_exclusive(file, options)
-
+      write_options.open_exclusive('w+') do |file|
         file.puts(data.to_s)
-
-        # Flush and fsync to be 100% sure we write this data out now because we
-        # are often reading it immediately and if the OS is buffering, it is
-        # possible we might read it before it is been physically written to
-        # disk. We are not worried about speed here, so this should be OKAY.
-        if write_options.flush?
-          file.flush
-          file.fsync
-        end
       end
 
       change_access(
@@ -201,6 +187,10 @@ module SugarUtils
     # uses :mode. The user can choose whichever alias makes their code most
     # readable.
     #
+    # @note This method is similar to the atomic_write which is implemnted in
+    # ActiveSupport.
+    # @see https://apidock.com/rails/File/atomic_write/class
+    #
     # @param filename [String]
     # @param data [#to_s]
     # @param options [Hash]
@@ -217,22 +207,13 @@ module SugarUtils
     def self.atomic_write(filename, data, options = {}) # rubocop:disable MethodLength, AbcSize
       write_options = WriteOptions.new(filename, options)
 
-      # @see https://apidock.com/rails/File/atomic_write/class
-      FileUtils.mkdir_p(::File.dirname(filename))
-      Tempfile.open(::File.basename(filename, '.*'), ::File.dirname(filename)) do |temp_file|
+      write_options.mkdirname_p
+      Tempfile.open(write_options.basename, write_options.dirname) do |temp_file|
         temp_file.puts(data.to_s)
-        # Flush and fsync to be 100% sure we write this data out now because we
-        # are often reading it immediately and if the OS is buffering, it is
-        # possible we might read it before it is been physically written to
-        # disk. We are not worried about speed here, so this should be OKAY.
-        if write_options.flush?
-          temp_file.flush
-          temp_file.fsync
-        end
+        write_options.flush_if_requested(temp_file)
         temp_file.close
 
-        ::File.open(filename, 'w+', write_options.perm) do |file|
-          flock_exclusive(file, options)
+        write_options.open_exclusive('w+') do
           FileUtils.move(temp_file.path, filename)
         end
       end
@@ -295,23 +276,11 @@ module SugarUtils
     # @raise [SugarUtils::File::Error]
     #
     # @return [void]
-    def self.append(filename, data, options = {}) # rubocop:disable MethodLength, AbcSize
+    def self.append(filename, data, options = {}) # rubocop:disable MethodLength
       write_options = WriteOptions.new(filename, options)
 
-      FileUtils.mkdir_p(::File.dirname(filename))
-      ::File.open(filename, 'a', write_options.perm) do |file|
-        flock_exclusive(file, options)
-
+      write_options.open_exclusive('a') do |file|
         file.puts(data.to_s)
-
-        # Flush and fsync to be 100% sure we write this data out now because we
-        # are often reading it immediately and if the OS is buffering, it is
-        # possible we might read it before it is been physically written to
-        # disk. We are not worried about speed here, so this should be OKAY.
-        if write_options.flush?
-          file.flush
-          file.fsync
-        end
       end
 
       change_access(

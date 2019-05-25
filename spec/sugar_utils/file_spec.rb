@@ -4,35 +4,25 @@ require 'spec_helper'
 
 describe SugarUtils::File do
   describe '.flock_shared' do
-    subject { described_class.flock_shared(file, options) }
-
-    let(:file) { instance_double(File) }
+    subject { described_class.flock_shared(:file, :options) }
 
     before do
-      allow(Timeout).to receive(:timeout).with(expected_timeout).and_yield
-      expect(file).to receive(:flock).with(::File::LOCK_SH)
+      expect(described_class::Lock).to receive(:flock_shared)
+        .with(:file, :options)
     end
 
-    inputs            :options,           :expected_timeout
-    side_effects_with Hash[],             10
-    side_effects_with Hash[timeout: nil], 10
-    side_effects_with Hash[timeout: 5],   5
+    it_has_side_effects
   end
 
   describe '.flock_exclusive' do
-    subject { described_class.flock_exclusive(file, options) }
-
-    let(:file) { instance_double(File) }
+    subject { described_class.flock_exclusive(:file, :options) }
 
     before do
-      allow(Timeout).to receive(:timeout).with(expected_timeout).and_yield
-      expect(file).to receive(:flock).with(::File::LOCK_EX)
+      expect(described_class::Lock).to receive(:flock_exclusive)
+        .with(:file, :options)
     end
 
-    inputs            :options,           :expected_timeout
-    side_effects_with Hash[],             10
-    side_effects_with Hash[timeout: nil], 10
-    side_effects_with Hash[timeout: 5],   5
+    it_has_side_effects
   end
 
   describe '.change_access', :fakefs do
@@ -173,54 +163,56 @@ describe SugarUtils::File do
     it_with          Hash['key' => 'value'].to_json, Hash['key' => 'value']
   end
 
-  describe '.touch', :fakefs do
-    subject { described_class.touch(filename, *options) }
+  describe '.touch' do
+    subject { described_class.touch(:filename, *args) }
 
-    let(:filename) { 'path1/path2/filename' }
+    before do
+      write_options =
+        instance_double(
+          described_class::WriteOptions, owner: :owner, group: :group
+        )
+      allow(write_options).to receive(:slice)
+        .with(:mtime)
+        .and_return(:mtime_option)
+      allow(write_options).to receive(:perm)
+        .with(nil)
+        .and_return(:perm_option)
 
-    context 'without options' do
-      let(:options) { [] }
+      allow(described_class::WriteOptions).to receive(:new)
+        .with(:filename, expected_options)
+        .and_return(write_options)
 
-      it { expect_not_to_raise_error }
-      its_side_effects_are { expect(File.exist?(filename)).to eq(true) }
+      expect(write_options).to receive(:mkdirname_p)
+      expect(FileUtils).to receive(:touch)
+        .with(:filename, :mtime_option)
+      expect(described_class).to receive(:change_access)
+        .with(:filename, :owner, :group, :perm_option)
     end
 
-    context 'with options, and :mode key' do
-      let(:options) { [{ owner: 'nobody', group: 'nogroup', mode: 0o600, mtime: 0 }] }
-
-      it { expect_not_to_raise_error }
-      its_side_effects_are do
-        expect(filename).to have_owner('nobody')
-        expect(filename).to have_group('nogroup')
-        expect(filename).to have_file_permission(0o100600)
-        expect(filename).to have_mtime(0)
-      end
-    end
-
-    context 'with options, and :perm key' do
-      let(:options) { [{ owner: 'nobody', group: 'nogroup', perm: 0o600, mtime: 0 }] }
-
-      it { expect_not_to_raise_error }
-      its_side_effects_are do
-        expect(filename).to have_owner('nobody')
-        expect(filename).to have_group('nogroup')
-        expect(filename).to have_file_permission(0o100600)
-        expect(filename).to have_mtime(0)
-      end
-    end
+    inputs            :args,       :expected_options
+    side_effects_with [],          Hash[]
+    side_effects_with %i[options], :options
   end
 
   describe '.write', :fakefs do
-    subject { described_class.write(filename, data, options) }
+    subject { described_class.write(filename, :content, options) }
 
-    let(:data)      { 'content' }
     let(:filename)  { 'dir1/dir2/filename' }
 
     context 'when SystemCallError' do
       let(:options) { {} }
       let(:exception) { SystemCallError.new(nil) }
 
-      before { allow(File).to receive(:open).and_raise(exception) }
+      before do
+        write_options = instance_double(described_class::WriteOptions)
+        allow(described_class::WriteOptions).to receive(:new)
+          .with(filename, options)
+          .and_return(write_options)
+
+        expect(write_options).to receive(:open_exclusive)
+          .with('w+')
+          .and_raise(exception)
+      end
 
       it { expect_raise_error("Unable to write #{filename} with #{exception}") }
     end
@@ -229,26 +221,66 @@ describe SugarUtils::File do
       let(:options) { {} }
       let(:exception) { IOError.new(nil) }
 
-      before { allow(File).to receive(:open).and_raise(exception) }
+      before do
+        write_options = instance_double(described_class::WriteOptions)
+        allow(described_class::WriteOptions).to receive(:new)
+          .with(filename, options)
+          .and_return(write_options)
+
+        expect(write_options).to receive(:open_exclusive)
+          .with('w+')
+          .and_raise(exception)
+      end
 
       it { expect_raise_error("Unable to write #{filename} with #{exception}") }
     end
 
-    context 'when locked' do
+    context 'when Timeout::Error' do
       let(:options) { {} }
 
       before do
-        expect(described_class).to receive(:flock_exclusive)
-          .with(kind_of(File), options)
+        write_options = instance_double(described_class::WriteOptions)
+        allow(described_class::WriteOptions).to receive(:new)
+          .with(filename, options)
+          .and_return(write_options)
+
+        expect(write_options).to receive(:open_exclusive)
+          .with('w+')
           .and_raise(Timeout::Error)
       end
 
       it { expect_raise_error("Unable to write #{filename} because it is locked") }
     end
 
+    context 'when successful' do
+      let(:options) { {} }
+
+      before do
+        write_options =
+          instance_double(
+            described_class::WriteOptions,
+            owner: :owner,
+            group: :group,
+            perm:  :perm
+          )
+        allow(described_class::WriteOptions).to receive(:new)
+          .with(filename, options)
+          .and_return(write_options)
+
+        expect(write_options).to receive(:open_exclusive)
+          .with('w+')
+          .and_yield(file = instance_double(File))
+        expect(file).to receive(:puts).with('content')
+        expect(described_class).to receive(:change_access)
+          .with(filename, :owner, :group, :perm)
+      end
+
+      it_has_side_effects
+    end
+
     shared_examples_for 'file is correctly written' do
       before do
-        expect(described_class).to receive(:flock_exclusive)
+        expect(described_class::Lock).to receive(:flock_exclusive)
           .with(kind_of(File), options)
       end
 
@@ -258,7 +290,7 @@ describe SugarUtils::File do
 
         it { expect_not_to_raise_error }
         its_side_effects_are do
-          expect(filename).to have_content(data)
+          expect(filename).to have_content('content')
           expect(filename).to have_file_permission(0o100644)
         end
       end
@@ -280,7 +312,7 @@ describe SugarUtils::File do
 
           it { expect_not_to_raise_error }
           its_side_effects_are do
-            expect(filename).to have_content(data)
+            expect(filename).to have_content('content')
             expect(filename).to have_owner('nobody')
             expect(filename).to have_group('nogroup')
             expect(filename).to have_file_permission(0o100600)
@@ -292,7 +324,7 @@ describe SugarUtils::File do
 
           it { expect_not_to_raise_error }
           its_side_effects_are do
-            expect(filename).to have_content(data)
+            expect(filename).to have_content('content')
             expect(filename).to have_owner('nobody')
             expect(filename).to have_group('nogroup')
             expect(filename).to have_file_permission(0o100600)
@@ -341,7 +373,7 @@ describe SugarUtils::File do
       let(:options) { {} }
 
       before do
-        expect(described_class).to receive(:flock_exclusive)
+        expect(described_class::Lock).to receive(:flock_exclusive)
           .with(kind_of(File), options)
           .and_raise(Timeout::Error)
       end
@@ -351,7 +383,7 @@ describe SugarUtils::File do
 
     shared_examples_for 'file is correctly written' do
       before do
-        expect(described_class).to receive(:flock_exclusive)
+        expect(described_class::Lock).to receive(:flock_exclusive)
           .with(kind_of(File), options)
       end
 
@@ -373,8 +405,8 @@ describe SugarUtils::File do
 
         before do
           # rubocop:disable RSpec/AnyInstance
-          expect_any_instance_of(File).to receive(:flush)
-          expect_any_instance_of(File).to receive(:fsync)
+          allow_any_instance_of(File).to receive(:flush)
+          allow_any_instance_of(File).to receive(:fsync)
           # rubocop:enable RSpec/AnyInstance
         end
 
@@ -458,7 +490,7 @@ describe SugarUtils::File do
       let(:options) { {} }
 
       before do
-        expect(described_class).to receive(:flock_exclusive)
+        expect(described_class::Lock).to receive(:flock_exclusive)
           .with(kind_of(File), options)
           .and_raise(Timeout::Error)
       end
@@ -468,7 +500,7 @@ describe SugarUtils::File do
 
     shared_examples_for 'file is correctly appended' do
       before do
-        expect(described_class).to receive(:flock_exclusive)
+        expect(described_class::Lock).to receive(:flock_exclusive)
           .with(kind_of(File), options)
       end
 
