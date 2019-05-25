@@ -139,6 +139,37 @@ module SugarUtils
       )
     end
 
+    def self.open_exclusive(filename, mode, options = {})
+      write_options = WriteOptions.new(filename, options)
+
+      FileUtils.mkdir_p(::File.dirname(filename))
+      ::File.open(filename, mode, write_options.perm) do |file|
+        flock_exclusive(file, options)
+
+        yield(file)
+
+        # Flush and fsync to be 100% sure we write this data out now because we
+        # are often reading it immediately and if the OS is buffering, it is
+        # possible we might read it before it is been physically written to
+        # disk. We are not worried about speed here, so this should be OKAY.
+        if write_options.flush?
+          file.flush
+          file.fsync
+        end
+      end
+
+      change_access(
+        filename,
+        write_options.owner,
+        write_options.group,
+        write_options.perm
+      )
+    rescue Timeout::Error
+      raise(Error, "Unable to write #{filename} because it is locked")
+    rescue SystemCallError, IOError => e
+      raise(Error, "Unable to write #{filename} with #{e}")
+    end
+
     # Write to an existing file, overwriting it, or create the file if it does
     # not exist.
     #
@@ -162,34 +193,37 @@ module SugarUtils
     #
     # @return [void]
     def self.write(filename, data, options = {}) # rubocop:disable MethodLength, AbcSize
-      write_options = WriteOptions.new(filename, options)
-
-      FileUtils.mkdir_p(::File.dirname(filename))
-      ::File.open(filename, 'w+', write_options.perm) do |file|
-        flock_exclusive(file, options)
-
+      open_exclusive(filename, 'w+', options) do |file|
         file.puts(data.to_s)
-
-        # Flush and fsync to be 100% sure we write this data out now because we
-        # are often reading it immediately and if the OS is buffering, it is
-        # possible we might read it before it is been physically written to
-        # disk. We are not worried about speed here, so this should be OKAY.
-        if write_options.flush?
-          file.flush
-          file.fsync
-        end
       end
-
-      change_access(
-        filename,
-        write_options.owner,
-        write_options.group,
-        write_options.perm
-      )
-    rescue Timeout::Error
-      raise(Error, "Unable to write #{filename} because it is locked")
-    rescue SystemCallError, IOError => e
-      raise(Error, "Unable to write #{filename} with #{e}")
+#      write_options = WriteOptions.new(filename, options)
+#
+#      FileUtils.mkdir_p(::File.dirname(filename))
+#      ::File.open(filename, 'w+', write_options.perm) do |file|
+#        flock_exclusive(file, options)
+#
+#        file.puts(data.to_s)
+#
+#        # Flush and fsync to be 100% sure we write this data out now because we
+#        # are often reading it immediately and if the OS is buffering, it is
+#        # possible we might read it before it is been physically written to
+#        # disk. We are not worried about speed here, so this should be OKAY.
+#        if write_options.flush?
+#          file.flush
+#          file.fsync
+#        end
+#      end
+#
+#      change_access(
+#        filename,
+#        write_options.owner,
+#        write_options.group,
+#        write_options.perm
+#      )
+#    rescue Timeout::Error
+#      raise(Error, "Unable to write #{filename} because it is locked")
+#    rescue SystemCallError, IOError => e
+#      raise(Error, "Unable to write #{filename} with #{e}")
     end
 
     # Atomically write to an existing file, overwriting it, or create the file
@@ -215,7 +249,7 @@ module SugarUtils
     #
     # @return [void]
     def self.atomic_write(filename, data, options = {}) # rubocop:disable MethodLength, AbcSize
-      write_options = WriteOptions.new(filename, options)
+#      write_options = WriteOptions.new(filename, options)
 
       # @see https://apidock.com/rails/File/atomic_write/class
       FileUtils.mkdir_p(::File.dirname(filename))
@@ -225,27 +259,32 @@ module SugarUtils
         # are often reading it immediately and if the OS is buffering, it is
         # possible we might read it before it is been physically written to
         # disk. We are not worried about speed here, so this should be OKAY.
-        if write_options.flush?
-          temp_file.flush
-          temp_file.fsync
-        end
+#        if write_options.flush?
+#          temp_file.flush
+#          temp_file.fsync
+#        end
         temp_file.close
 
-        ::File.open(filename, 'w+', write_options.perm) do |file|
-          flock_exclusive(file, options)
-          FileUtils.move(temp_file.path, filename)
+        open_exclusive(filename, 'w+', options) do |file|
+          file.puts(data.to_s)
         end
+
+#        ::File.open(filename, 'w+', write_options.perm) do |file|
+#          flock_exclusive(file, options)
+#          FileUtils.move(temp_file.path, filename)
+#        end
       end
 
-      change_access(
-        filename,
-        write_options.owner,
-        write_options.group,
-        write_options.perm
-      )
-    rescue Timeout::Error
-      raise(Error, "Unable to write #{filename} because it is locked")
+#      change_access(
+#        filename,
+#        write_options.owner,
+#        write_options.group,
+#        write_options.perm
+#      )
+#    rescue Timeout::Error
+#      raise(Error, "Unable to write #{filename} because it is locked")
     rescue SystemCallError, IOError => e
+      # NOTE: Catch any errors on opening the temporary file.
       raise(Error, "Unable to write #{filename} with #{e}")
     end
 
@@ -296,34 +335,38 @@ module SugarUtils
     #
     # @return [void]
     def self.append(filename, data, options = {}) # rubocop:disable MethodLength, AbcSize
-      write_options = WriteOptions.new(filename, options)
-
-      FileUtils.mkdir_p(::File.dirname(filename))
-      ::File.open(filename, 'a', write_options.perm) do |file|
-        flock_exclusive(file, options)
-
+      open_exclusive(filename, 'a', options) do |file|
         file.puts(data.to_s)
-
-        # Flush and fsync to be 100% sure we write this data out now because we
-        # are often reading it immediately and if the OS is buffering, it is
-        # possible we might read it before it is been physically written to
-        # disk. We are not worried about speed here, so this should be OKAY.
-        if write_options.flush?
-          file.flush
-          file.fsync
-        end
       end
 
-      change_access(
-        filename,
-        write_options.owner,
-        write_options.group,
-        write_options.perm
-      )
-    rescue Timeout::Error
-      raise(Error, "Unable to write #{filename} because it is locked")
-    rescue SystemCallError, IOError => e
-      raise(Error, "Unable to write #{filename} with #{e}")
+#      write_options = WriteOptions.new(filename, options)
+#
+#      FileUtils.mkdir_p(::File.dirname(filename))
+#      ::File.open(filename, 'a', write_options.perm) do |file|
+#        flock_exclusive(file, options)
+#
+#        file.puts(data.to_s)
+#
+#        # Flush and fsync to be 100% sure we write this data out now because we
+#        # are often reading it immediately and if the OS is buffering, it is
+#        # possible we might read it before it is been physically written to
+#        # disk. We are not worried about speed here, so this should be OKAY.
+#        if write_options.flush?
+#          file.flush
+#          file.fsync
+#        end
+#      end
+#
+#      change_access(
+#        filename,
+#        write_options.owner,
+#        write_options.group,
+#        write_options.perm
+#      )
+#    rescue Timeout::Error
+#      raise(Error, "Unable to write #{filename} because it is locked")
+#    rescue SystemCallError, IOError => e
+#      raise(Error, "Unable to write #{filename} with #{e}")
     end
 
     ############################################################################

@@ -373,8 +373,8 @@ describe SugarUtils::File do
 
         before do
           # rubocop:disable RSpec/AnyInstance
-          expect_any_instance_of(File).to receive(:flush)
-          expect_any_instance_of(File).to receive(:fsync)
+          expect_any_instance_of(File).to receive(:flush).at_least(:once)
+          expect_any_instance_of(File).to receive(:fsync).at_least(:once)
           # rubocop:enable RSpec/AnyInstance
         end
 
